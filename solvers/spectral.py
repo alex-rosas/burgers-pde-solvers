@@ -129,17 +129,19 @@ def rhs(v_hat, t, k, N, nu):
     -------
     dv_hat : np.ndarray -- time derivative of v_hat, shape (N,)
     """
-    IF     = np.exp( nu * k**2 * t)   # exp(+nu*k^2*t): integrating factor
-    IF_inv = np.exp(-nu * k**2 * t)   # exp(-nu*k^2*t): its inverse
+    # Only compute IF for active modes (|k| <= N/3)
+    # For inactive modes nl=0 after dealiasing, so RHS=0 regardless
+    # This avoids exp(nu*k^2*t) overflow for large k and large nu
+    k_max  = N // 3
+    active = np.abs(k) <= k_max
 
-    # Recover u_hat from the integrating-factor variable
-    u_hat = IF_inv * v_hat
+    IF_inv = np.exp(-nu * k**2 * t)
+    u_hat  = IF_inv * v_hat
+    nl     = nonlinear_term(u_hat, k, N)
 
-    # Pseudospectral nonlinear term
-    nl = nonlinear_term(u_hat, k, N)
-
-    # RHS: exp(+nu*k^2*t) * (-nl)
-    return IF * (-nl)
+    result           = np.zeros_like(v_hat)
+    result[active]   = np.exp(nu * k[active]**2 * t) * (-nl[active])
+    return result
 
 
 def solve_spectral(u0, N, T, nu, cfl=0.5):
