@@ -21,9 +21,9 @@ results/
 *.npy
 
 # Matplotlib / output figures (generated)
-figures/
-*.png
-*.pdf
+#figures/
+#*.png
+#*.pdf
 
 # OS
 .DS_Store

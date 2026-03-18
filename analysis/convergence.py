@@ -42,6 +42,7 @@ for method_name, solver in METHODS.items():
         u_num, _ = solver(u0, N, T, NU, cfl=CFL)
         u_ex     = u_exact(x, T, NU)
         err      = l2_error(u_num, u_ex, dx)
+        err = max(err, 1e-16)   # floor at machine precision instead of NaN
         results.append({
             'method': method_name,
             'N':      N,
