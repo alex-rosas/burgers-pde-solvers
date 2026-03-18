@@ -45,7 +45,7 @@ The parameter $\nu > 0$ is the kinematic viscosity. For large $\nu$ the solution
 ---
 ![Convergence](figures/readme_convergence_banner.png)
 
-> **Reading the figure.** FDM and FEM show algebraic decay — each doubling of $N$ reduces the error by a fixed factor. The spectral method decays exponentially: the error drops faster than any fixed slope until it reaches floating-point machine precision (~1e-14) around $N=512$, after which no further improvement is possible regardless of grid refinement. The flatline at the bottom is not a bug — it is the floor of double precision arithmetic.
+> **Reading the figure.** FDM and FEM show algebraic decay — each doubling of $N$ reduces the error by a fixed factor. The spectral method decays exponentially: the error drops faster than any fixed slope until it reaches floating-point machine precision around $N=512$. Beyond that point the computed error is indistinguishable from zero and is stored as `NaN` in the results — the curve ends not because the solver fails, but because there is nothing left to measure.
 > 
 ## Key Results
 
