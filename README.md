@@ -2,6 +2,8 @@
 
 A comparative study of **Finite Difference (FDM)**, **Finite Element (FEM)**, and **Fourier Spectral** methods applied to the viscous Burgers equation.
 
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://burgers-pde-solvers.streamlit.app/)
+
 ---
 
 ## How This Project Came About
@@ -153,7 +155,10 @@ python analysis/formulation.py
 # Tests
 pytest tests/
 
-# Interactive app
+# Interactive app (live)
+# https://burgers-pde-solvers.streamlit.app/
+
+# or run locally
 streamlit run app.py
 
 # Narrative notebook
