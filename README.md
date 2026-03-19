@@ -80,7 +80,7 @@ The parameter $\nu > 0$ is the kinematic viscosity. For large $\nu$ the solution
 
 **Conservative vs advective formulation.** The viscous Burgers equation can be written as $u_t + u\,u_x = \nu\,u_{xx}$ (advective) or equivalently as $u_t + \partial(u^2/2)/\partial x = \nu\,u_{xx}$ (conservative). For sufficiently smooth solutions the two formulations lead to equivalent truncation errors under standard discretisations. In the near-shock regime, however, the conservative form more faithfully preserves the conservation structure governing shock propagation, while the advective form resolves the shock layer differently, producing a different profile shape and smearing width; for the symmetric $\sin(x)$ initial condition both formulations place the shock at the same position ($s=0$ by symmetry), but the profile diverges as $\nu \to 0$.
 
-![Formulation L2 difference](figures/formulation_l2diff.png)
+![Formulation L2 difference](figures/readme_formulation_l2diff_dark.png)
 
 > **Reading the figure.** Each bar is the $L^2$ norm of $(u_\text{advective} - u_\text{conservative})$ at $T=1$ for a fixed viscosity. The difference is negligible at $\nu=0.05$ (smooth solution) and grows by roughly an order of magnitude at $\nu=0.005$ (near-shock). This is the canonical argument for why conservation-law solvers are preferred in shock-dominated flows.
 
