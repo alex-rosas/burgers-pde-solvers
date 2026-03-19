@@ -1,4 +1,4 @@
-# Accuracy vs Computational Cost in Nonlinear PDE Solvers
+# Three Roads to Burgers: Finite Difference, Finite Element, and Spectral Methods Under Smooth and Shock Regimes
 
 A comparative study of **Finite Difference (FDM)**, **Finite Element (FEM)**, and **Fourier Spectral** methods applied to the viscous Burgers equation.
 
@@ -54,6 +54,7 @@ The parameter $\nu > 0$ is the kinematic viscosity. For large $\nu$ the solution
 - Near shocks ($\nu=0.005$): FDM smears, FEM oscillates, Spectral rings (Gibbs)
 - Crank-Nicolson is unconditionally stable; explicit Euler blows up at $r = \nu\,\Delta t/\Delta x^2 > 0.5$
 - Memory is $O(N)$ for all methods; FEM runtime grows super-linearly due to Python loop overhead in element assembly
+- **Formulation matters near shocks**: the conservative and advective forms of the FDM agree for smooth solutions but diverge as $\nu \to 0$; the conservative form more faithfully preserves the conservation structure governing shock propagation, producing a sharper, physically consistent shock profile, while the advective form introduces different numerical smearing; for the symmetric $\sin(x)$ initial condition the shock position is the same in both (shock speed $s=0$ by symmetry), but the profile shape and smearing width diverge as $\nu \to 0$
 
 ---
 
@@ -77,6 +78,12 @@ The parameter $\nu > 0$ is the kinematic viscosity. For large $\nu$ the solution
 
 > **Reading the figure.** At $\nu=0.005$ all three methods struggle near the shock layer. FDM smears it (artificial viscosity), FEM develops spurious oscillations (no upwinding), and the spectral method rings (Gibbs phenomenon). The exact solution overlay is omitted here because its Fourier representation is itself unreliable at this viscosity.
 
+**Conservative vs advective formulation.** The viscous Burgers equation can be written as $u_t + u\,u_x = \nu\,u_{xx}$ (advective) or equivalently as $u_t + \partial(u^2/2)/\partial x = \nu\,u_{xx}$ (conservative). For sufficiently smooth solutions the two formulations lead to equivalent truncation errors under standard discretisations. In the near-shock regime, however, the conservative form more faithfully preserves the conservation structure governing shock propagation, while the advective form resolves the shock layer differently, producing a different profile shape and smearing width; for the symmetric $\sin(x)$ initial condition both formulations place the shock at the same position ($s=0$ by symmetry), but the profile diverges as $\nu \to 0$.
+
+![Formulation L2 difference](figures/formulation_l2diff.png)
+
+> **Reading the figure.** Each bar is the $L^2$ norm of $(u_\text{advective} - u_\text{conservative})$ at $T=1$ for a fixed viscosity. The difference is negligible at $\nu=0.05$ (smooth solution) and grows by roughly an order of magnitude at $\nu=0.005$ (near-shock). This is the canonical argument for why conservation-law solvers are preferred in shock-dominated flows.
+
 ---
 
 ## Repo Structure
@@ -89,10 +96,11 @@ burgers-pde-solvers/
     fem.py          Finite element solver
     spectral.py     Fourier pseudospectral solver
   analysis/
-    convergence.py  L2 error vs N for all three methods
-    performance.py  Runtime and memory scaling
-    shock.py        Shock resolution study
-    cfl.py          CN vs explicit Euler stability contrast
+    convergence.py   L2 error vs N for all three methods
+    performance.py   Runtime and memory scaling
+    shock.py         Shock resolution study
+    cfl.py           CN vs explicit Euler stability contrast
+    formulation.py   Conservative vs advective FDM formulation
   tests/
     test_exact.py
     test_fdm.py
@@ -140,6 +148,7 @@ python analysis/convergence.py
 python analysis/performance.py
 python analysis/shock.py
 python analysis/cfl.py
+python analysis/formulation.py
 
 # Tests
 pytest tests/
