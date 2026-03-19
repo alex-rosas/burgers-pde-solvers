@@ -1,15 +1,16 @@
 """
 app.py
 ======
-Streamlit interactive app for the Burgers PDE solver comparison project.
+Streamlit interactive app — Three Roads to Burgers.
 Run: streamlit run app.py
 
-Five tabs:
+Six tabs:
   1. Solver Explorer  -- live solver with sliders
   2. Convergence      -- plots from results/convergence.csv
   3. Performance      -- plots from results/performance.csv
   4. Shock Resolution -- panel figures + live comparison
-  5. About            -- project description and links
+  5. Formulation      -- conservative vs advective FDM
+  6. About            -- project description and links
 """
 
 from pathlib import Path
@@ -27,23 +28,23 @@ from solvers.spectral import solve_spectral
 
 # ---- Page config --------------------------------------------------
 st.set_page_config(
-    page_title="Burgers PDE Solvers",
+    page_title="Three Roads to Burgers",
     page_icon=":chart_with_upwards_trend:",
     layout="wide",
 )
 
-st.title("Accuracy vs Computational Cost in Nonlinear PDE Solvers")
+st.title("Three Roads to Burgers: FDM, FEM, and Spectral Methods Under Smooth and Shock Regimes")
 st.caption(
-    "A comparative study of FDM, FEM, and Fourier spectral methods "
-    "on the viscous Burgers equation.  "
+    "A controlled numerical study of how discretisation choice, conservation structure, and "
+    "solution regularity shape accuracy and computational cost in nonlinear PDE solvers.  "
     "[[GitHub]](https://github.com/alex-rosas/burgers-pde-solvers)"
 )
 
 SOLVERS = {"FDM": solve_fdm, "FEM": solve_fem, "Spectral": solve_spectral}
 COLORS  = {"FDM": "tomato",  "FEM": "steelblue", "Spectral": "seagreen"}
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
-    ["Solver Explorer", "Convergence", "Performance", "Shock Resolution", "About"]
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+    ["Solver Explorer", "Convergence", "Performance", "Shock Resolution", "Formulation", "About"]
 )
 
 
@@ -287,9 +288,92 @@ with tab4:
 
 
 # ==================================================================
-# Tab 5 -- About
+# Tab 5 -- Formulation
 # ==================================================================
 with tab5:
+    st.header("Conservative vs Advective Formulation")
+    st.markdown(
+        r"""
+The viscous Burgers equation admits two equivalent continuous forms:
+
+$$\text{Advective:} \quad u_t + u\,u_x = \nu\,u_{xx}$$
+$$\text{Conservative:} \quad u_t + \frac{\partial}{\partial x}\!\left(\frac{u^2}{2}\right) = \nu\,u_{xx}$$
+
+For smooth solutions these are numerically interchangeable (both $O(\Delta x)$ first-order accurate).
+Near shocks the **conservative form** inherits the Rankine-Hugoniot shock-speed condition from the
+underlying flux structure; the **advective form** does not, and resolves the shock layer differently.
+        """
+    )
+
+    col_img1, col_img2 = st.columns([3, 2])
+    with col_img1:
+        prof_path = ROOT / "figures" / "formulation_profiles.png"
+        if prof_path.exists():
+            st.image(str(prof_path),
+                     caption="Solution overlays across viscosities — agreement for smooth, divergence near shock",
+                     use_container_width=True)
+    with col_img2:
+        diff_path = ROOT / "figures" / "formulation_l2diff.png"
+        if diff_path.exists():
+            st.image(str(diff_path),
+                     caption="L2 difference between formulations grows monotonically as ν → 0",
+                     use_container_width=True)
+
+    zoom_path = ROOT / "figures" / "formulation_zoom.png"
+    if zoom_path.exists():
+        st.image(str(zoom_path),
+                 caption="Shock-layer zoom at ν=0.005 — shaded region is the pointwise difference between formulations",
+                 use_container_width=True)
+
+    st.subheader("Live comparison")
+    st.markdown(r"Pick $\nu$ and see both formulations side by side in real time.")
+
+    nu_form = st.select_slider(
+        r"Viscosity ν", options=[0.05, 0.02, 0.01, 0.005], value=0.01, key="form_nu"
+    )
+    N_form = st.select_slider(
+        "Grid points N", options=[64, 128, 256], value=256, key="form_N"
+    )
+
+    if st.button("Run both formulations", type="primary"):
+        x_app  = np.linspace(0, 2*np.pi, N_form, endpoint=False)
+        u0_app = np.sin(x_app)
+        dx_app = 2*np.pi / N_form
+
+        with st.spinner("Running advective..."):
+            u_adv, _ = solve_fdm(u0_app, N_form, 1.0, nu_form, cfl=0.4, formulation='advective')
+        with st.spinner("Running conservative..."):
+            u_con, _ = solve_fdm(u0_app, N_form, 1.0, nu_form, cfl=0.4, formulation='conservative')
+
+        l2_diff = np.sqrt(dx_app * np.sum((u_adv - u_con)**2))
+
+        fig, axes = plt.subplots(1, 2, figsize=(11, 4))
+
+        # Full profile overlay
+        axes[0].plot(x_app, u_adv, '-',  color='tomato',    lw=2, label='Advective')
+        axes[0].plot(x_app, u_con, '--', color='steelblue', lw=2, label='Conservative')
+        axes[0].set_title(f'Full profile  |  ν={nu_form}, N={N_form}')
+        axes[0].set_xlabel('x'); axes[0].legend(); axes[0].grid(alpha=0.3)
+        axes[0].set_ylim(-1.5, 1.5)
+
+        # Shock-layer zoom
+        mask = (x_app >= 2.5) & (x_app <= 4.5)
+        axes[1].plot(x_app[mask], u_adv[mask], '-',  color='tomato',    lw=2.5, label='Advective')
+        axes[1].plot(x_app[mask], u_con[mask], '--', color='steelblue', lw=2.5, label='Conservative')
+        axes[1].fill_between(x_app[mask], u_adv[mask], u_con[mask], alpha=0.2, color='purple')
+        axes[1].set_title('Shock-layer zoom  [2.5, 4.5]')
+        axes[1].set_xlabel('x'); axes[1].legend(); axes[1].grid(alpha=0.3)
+
+        plt.tight_layout()
+        st.pyplot(fig)
+        plt.close()
+        st.metric("L2 difference (adv − con)", f"{l2_diff:.3e}")
+
+
+# ==================================================================
+# Tab 6 -- About
+# ==================================================================
+with tab6:
     st.header("About This Project")
 
     st.subheader("The PDE")
