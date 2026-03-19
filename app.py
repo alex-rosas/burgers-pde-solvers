@@ -5,7 +5,7 @@ Streamlit interactive app — Three Roads to Burgers.
 Run: streamlit run app.py
 
 Six tabs:
-  1. Solver Explorer  -- live solver with sliders
+  1. Solver Explorer  -- live solver, auto-updates on slider change
   2. Convergence      -- plots from results/convergence.csv
   3. Performance      -- plots from results/performance.csv
   4. Shock Resolution -- panel figures + live comparison
@@ -16,8 +16,9 @@ Six tabs:
 from pathlib import Path
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import streamlit as st
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 ROOT = Path(__file__).resolve().parent
 
@@ -41,11 +42,52 @@ st.caption(
 )
 
 SOLVERS = {"FDM": solve_fdm, "FEM": solve_fem, "Spectral": solve_spectral}
-COLORS  = {"FDM": "tomato",  "FEM": "steelblue", "Spectral": "seagreen"}
+COLORS  = {"FDM": "#FF6347",  "FEM": "#4682B4", "Spectral": "#3CB371"}
+
+# Shared Plotly layout applied to every figure
+PLOTLY_LAYOUT = dict(
+    template="plotly_dark",
+    paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor="rgba(20,20,30,1)",
+    font=dict(color="white"),
+    margin=dict(l=50, r=20, t=50, b=50),
+)
 
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
     ["Solver Explorer", "Convergence", "Performance", "Shock Resolution", "Formulation", "About"]
 )
+
+
+# ---- Cached solvers -----------------------------------------------
+
+@st.cache_data(show_spinner=False)
+def run_solver(method: str, N: int, T: float, nu: float, cfl: float):
+    x    = np.linspace(0, 2 * np.pi, N, endpoint=False)
+    u0   = np.sin(x)
+    u_num, _ = SOLVERS[method](u0, N, T, nu, cfl=cfl)
+    u_ex     = u_exact(x, T, nu)
+    dx        = 2 * np.pi / N
+    err       = float(np.sqrt(dx * np.sum((u_num - u_ex) ** 2)))
+    return x, u_num, u_ex, err
+
+
+@st.cache_data(show_spinner=False)
+def run_all_solvers(N: int, nu: float):
+    x  = np.linspace(0, 2 * np.pi, N, endpoint=False)
+    u0 = np.sin(x)
+    results = {m: SOLVERS[m](u0, N, 1.0, nu, cfl=0.4)[0] for m in SOLVERS}
+    return x, results
+
+
+@st.cache_data(show_spinner=False)
+def run_formulations(N: int, nu: float):
+    x  = np.linspace(0, 2 * np.pi, N, endpoint=False)
+    u0 = np.sin(x)
+    u_adv, _ = solve_fdm(u0, N, 1.0, nu, cfl=0.4, formulation="advective")
+    u_con, _ = solve_fdm(u0, N, 1.0, nu, cfl=0.4, formulation="conservative")
+    dx       = 2 * np.pi / N
+    l2_diff  = float(np.sqrt(dx * np.sum((u_adv - u_con) ** 2)))
+    return x, u_adv, u_con, l2_diff
 
 
 # ==================================================================
@@ -54,7 +96,7 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
 with tab1:
     st.header("Interactive Solver Explorer")
     st.markdown(
-        r"Adjust parameters and run a solver live. "
+        r"Adjust any parameter and the plot updates instantly. "
         r"Watch what happens as $\nu \to 0$ (shock forms) "
         r"or as $N$ increases (solution converges)."
     )
@@ -64,45 +106,39 @@ with tab1:
     with col1:
         method = st.selectbox("Method", list(SOLVERS.keys()))
         N      = st.select_slider("Grid points N",
-                    options=[16, 32, 64, 128, 256, 512], value=64)
-        nu     = st.select_slider(r"Viscosity nu",
-                    options=[0.1, 0.05, 0.02, 0.01, 0.005], value=0.1)
+                     options=[16, 32, 64, 128, 256, 512], value=64)
+        nu     = st.select_slider(r"Viscosity ν",
+                     options=[0.1, 0.05, 0.02, 0.01, 0.005], value=0.1)
         T      = st.slider("Final time T", 0.1, 2.0, 1.0, step=0.1)
         cfl    = st.slider("CFL number",   0.1, 0.9, 0.4, step=0.1)
-        run    = st.button("Run solver", type="primary")
 
     with col2:
-        if run:
-            x  = np.linspace(0, 2*np.pi, N, endpoint=False)
-            u0 = np.sin(x)
+        with st.spinner("Solving…"):
+            x, u_num, u_ex, err = run_solver(method, N, T, nu, cfl)
 
-            with st.spinner(f"Running {method}..."):
-                u_num, _ = SOLVERS[method](u0, N, T, nu, cfl=cfl)
-                u_ex     = u_exact(x, T, nu)
-                dx       = 2*np.pi / N
-                err      = np.sqrt(dx * np.sum((u_num - u_ex)**2))
+        fig = make_subplots(rows=1, cols=2,
+                            subplot_titles=("Solution vs Exact", "Pointwise Error"))
 
-            fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+        fig.add_trace(go.Scatter(x=x, y=u_ex, name="Exact",
+                                 line=dict(color="white", dash="dash", width=2)),
+                      row=1, col=1)
+        fig.add_trace(go.Scatter(x=x, y=u_num, name=method,
+                                 line=dict(color=COLORS[method], width=2)),
+                      row=1, col=1)
+        fig.add_trace(go.Scatter(x=x, y=u_num - u_ex, name="Error",
+                                 line=dict(color=COLORS[method], width=1.5),
+                                 showlegend=False),
+                      row=1, col=2)
+        fig.add_hline(y=0, line=dict(color="gray", dash="dash", width=0.5), row=1, col=2)
 
-            axes[0].plot(x, u_ex,  'k--', lw=2,  label='Exact')
-            axes[0].plot(x, u_num, color=COLORS[method], lw=1.8, label=method)
-            axes[0].set_title(f"{method} vs Exact  |  L2 = {err:.2e}")
-            axes[0].set_xlabel("x")
-            axes[0].legend()
-            axes[0].grid(alpha=0.3)
-
-            axes[1].plot(x, u_num - u_ex, color=COLORS[method], lw=1.5)
-            axes[1].axhline(0, color='gray', lw=0.5, ls='--')
-            axes[1].set_title("Pointwise error")
-            axes[1].set_xlabel("x")
-            axes[1].grid(alpha=0.3)
-
-            plt.tight_layout()
-            st.pyplot(fig)
-            plt.close()
-            st.metric("L2 error", f"{err:.3e}")
-        else:
-            st.info("Set parameters and click **Run solver**.")
+        fig.update_xaxes(title_text="x")
+        fig.update_yaxes(title_text="u",     row=1, col=1)
+        fig.update_yaxes(title_text="error", row=1, col=2)
+        fig.update_layout(**PLOTLY_LAYOUT,
+                          title=f"{method}  |  L² error = {err:.2e}",
+                          height=420)
+        st.plotly_chart(fig, use_container_width=True)
+        st.metric("L² error", f"{err:.3e}")
 
 
 # ==================================================================
@@ -128,45 +164,45 @@ with tab2:
 
         with col_a:
             st.subheader("Log-log plot")
-            fig, ax = plt.subplots(figsize=(6, 4))
+            fig = go.Figure()
             for m in methods:
-                sub = df[df['method'] == m]
-                ax.loglog(sub['N'], sub['error'],
-                          'o-', color=COLORS[m], lw=2, ms=6, label=m)
+                sub = df[df["method"] == m]
+                fig.add_trace(go.Scatter(x=sub["N"], y=sub["error"],
+                                         mode="lines+markers", name=m,
+                                         line=dict(color=COLORS[m], width=2),
+                                         marker=dict(size=7)))
             N_ref = np.array([16, 1024])
-            ax.loglog(N_ref, 0.8*(N_ref/16)**(-1), 'k--', lw=1, label='slope $-1$')
-            ax.loglog(N_ref, 0.3*(N_ref/16)**(-2), 'k:',  lw=1, label='slope $-2$')
-            ax.set_xlabel("N")
-            ax.set_ylabel("$L^2$ error")
-            ax.set_title("Log-log convergence")
-            ax.legend()
-            ax.grid(alpha=0.3)
-            plt.tight_layout()
-            st.pyplot(fig)
-            plt.close()
+            fig.add_trace(go.Scatter(x=N_ref, y=0.8 * (N_ref / 16) ** (-1),
+                                     mode="lines", name="slope −1",
+                                     line=dict(color="white", dash="dash", width=1)))
+            fig.add_trace(go.Scatter(x=N_ref, y=0.3 * (N_ref / 16) ** (-2),
+                                     mode="lines", name="slope −2",
+                                     line=dict(color="lightgray", dash="dot", width=1)))
+            fig.update_xaxes(type="log", title="N")
+            fig.update_yaxes(type="log", title="L² error")
+            fig.update_layout(**PLOTLY_LAYOUT, title="Log-log convergence", height=380)
+            st.plotly_chart(fig, use_container_width=True)
 
         with col_b:
             st.subheader("Semi-log plot")
-            fig, ax = plt.subplots(figsize=(6, 4))
+            fig = go.Figure()
             for m in methods:
-                sub = df[df['method'] == m]
-                ax.semilogy(sub['N'], sub['error'],
-                            'o-', color=COLORS[m], lw=2, ms=6, label=m)
-            ax.set_xlabel("N")
-            ax.set_ylabel("$L^2$ error (log scale)")
-            ax.set_title("Exponential decay of spectral method")
-            ax.legend()
-            ax.grid(alpha=0.3)
-            plt.tight_layout()
-            st.pyplot(fig)
-            plt.close()
+                sub = df[df["method"] == m]
+                fig.add_trace(go.Scatter(x=sub["N"], y=sub["error"],
+                                         mode="lines+markers", name=m,
+                                         line=dict(color=COLORS[m], width=2),
+                                         marker=dict(size=7)))
+            fig.update_xaxes(title="N")
+            fig.update_yaxes(type="log", title="L² error (log scale)")
+            fig.update_layout(**PLOTLY_LAYOUT,
+                              title="Exponential decay of spectral method", height=380)
+            st.plotly_chart(fig, use_container_width=True)
 
-        # Slopes table
         st.subheader("Measured convergence slopes")
         rows = []
         for m in ["FDM", "FEM"]:
-            sub   = df[df['method'] == m]
-            slope = np.polyfit(sub['log_N'], sub['log_E'], 1)[0]
+            sub   = df[df["method"] == m]
+            slope = np.polyfit(sub["log_N"], sub["log_E"], 1)[0]
             rows.append({
                 "Method":         m,
                 "Measured slope": f"{slope:.2f}",
@@ -195,41 +231,40 @@ with tab3:
 
         with col_a:
             st.subheader("Runtime scaling")
-            fig, ax = plt.subplots(figsize=(6, 4))
+            fig = go.Figure()
             for m in ["FDM", "FEM", "Spectral"]:
-                sub = df[df['method'] == m]
-                ax.loglog(sub['N'], sub['runtime'],
-                          'o-', color=COLORS[m], lw=2, ms=6, label=m)
+                sub = df[df["method"] == m]
+                fig.add_trace(go.Scatter(x=sub["N"], y=sub["runtime"],
+                                         mode="lines+markers", name=m,
+                                         line=dict(color=COLORS[m], width=2),
+                                         marker=dict(size=7)))
             N_ref = np.array([64, 2048])
-            t_ref = df[df['method'] == 'FDM']['runtime'].values[0]
-            ax.loglog(N_ref, t_ref*(N_ref/64)**1.0,
-                      'k--', lw=1, label='$O(N)$')
-            ax.loglog(N_ref, t_ref*(N_ref/64)*np.log2(N_ref/64+1),
-                      'k:',  lw=1, label='$O(N\log N)$')
-            ax.set_xlabel("N")
-            ax.set_ylabel("Runtime (s)")
-            ax.set_title("Runtime scaling")
-            ax.legend()
-            ax.grid(alpha=0.3)
-            plt.tight_layout()
-            st.pyplot(fig)
-            plt.close()
+            t_ref = df[df["method"] == "FDM"]["runtime"].values[0]
+            fig.add_trace(go.Scatter(x=N_ref, y=t_ref * (N_ref / 64) ** 1.0,
+                                     mode="lines", name="O(N)",
+                                     line=dict(color="white", dash="dash", width=1)))
+            fig.add_trace(go.Scatter(x=N_ref,
+                                     y=t_ref * (N_ref / 64) * np.log2(N_ref / 64 + 1),
+                                     mode="lines", name="O(N log N)",
+                                     line=dict(color="lightgray", dash="dot", width=1)))
+            fig.update_xaxes(type="log", title="N")
+            fig.update_yaxes(type="log", title="Runtime (s)")
+            fig.update_layout(**PLOTLY_LAYOUT, title="Runtime scaling", height=380)
+            st.plotly_chart(fig, use_container_width=True)
 
         with col_b:
             st.subheader("Memory scaling")
-            fig, ax = plt.subplots(figsize=(6, 4))
+            fig = go.Figure()
             for m in ["FDM", "FEM", "Spectral"]:
-                sub = df[df['method'] == m]
-                ax.loglog(sub['N'], sub['memory_mb'],
-                          'o-', color=COLORS[m], lw=2, ms=6, label=m)
-            ax.set_xlabel("N")
-            ax.set_ylabel("Peak memory (MB)")
-            ax.set_title("Memory scaling")
-            ax.legend()
-            ax.grid(alpha=0.3)
-            plt.tight_layout()
-            st.pyplot(fig)
-            plt.close()
+                sub = df[df["method"] == m]
+                fig.add_trace(go.Scatter(x=sub["N"], y=sub["memory_mb"],
+                                         mode="lines+markers", name=m,
+                                         line=dict(color=COLORS[m], width=2),
+                                         marker=dict(size=7)))
+            fig.update_xaxes(type="log", title="N")
+            fig.update_yaxes(type="log", title="Peak memory (MB)")
+            fig.update_layout(**PLOTLY_LAYOUT, title="Memory scaling", height=380)
+            st.plotly_chart(fig, use_container_width=True)
     else:
         st.warning("Run `python analysis/performance.py` first to generate the CSV.")
 
@@ -251,40 +286,41 @@ with tab4:
 
     if panel_path.exists():
         st.image(str(panel_path),
-                 caption="4x3 panel: rows = viscosity (decreasing), columns = method",
+                 caption="4×3 panel: rows = viscosity (decreasing), columns = method",
                  use_container_width=True)
     if zoom_path.exists():
         st.image(str(zoom_path),
-                 caption=r"Shock layer zoom at nu=0.005: FDM smears, FEM and Spectral are close",
+                 caption=r"Shock layer zoom at ν=0.005: FDM smears, FEM and Spectral are close",
                  use_container_width=True)
 
     st.subheader("Live comparison")
-    st.markdown(r"Pick $\nu$ and $N$ and run all three solvers simultaneously.")
+    st.markdown(r"Pick $\nu$ and $N$ — all three solvers update automatically.")
 
-    nu_shock = st.select_slider(
-        r"Viscosity nu",
-        options=[0.05, 0.02, 0.01, 0.005], value=0.02, key="shock_nu"
-    )
-    N_shock = st.select_slider(
-        "Grid points N",
-        options=[64, 128, 256], value=128, key="shock_N"
-    )
+    col_s1, col_s2 = st.columns(2)
+    with col_s1:
+        nu_shock = st.select_slider(
+            r"Viscosity ν", options=[0.05, 0.02, 0.01, 0.005], value=0.02, key="shock_nu"
+        )
+    with col_s2:
+        N_shock = st.select_slider(
+            "Grid points N", options=[64, 128, 256], value=128, key="shock_N"
+        )
 
-    if st.button("Compare all methods", type="primary"):
-        x  = np.linspace(0, 2*np.pi, N_shock, endpoint=False)
-        u0 = np.sin(x)
-        fig, axes = plt.subplots(1, 3, figsize=(13, 4))
-        for ax, (method, solver) in zip(axes, SOLVERS.items()):
-            with st.spinner(f"Running {method}..."):
-                u_num, _ = solver(u0, N_shock, 1.0, nu_shock, cfl=0.4)
-            ax.plot(x, u_num, color=COLORS[method], lw=2, label=method)
-            ax.set_title(f"{method}  |  nu={nu_shock}")
-            ax.set_xlabel("x")
-            ax.set_ylim(-1.5, 1.5)
-            ax.grid(alpha=0.3)
-        plt.tight_layout()
-        st.pyplot(fig)
-        plt.close()
+    with st.spinner("Solving…"):
+        x_s, results_s = run_all_solvers(N_shock, nu_shock)
+
+    fig = make_subplots(rows=1, cols=3, subplot_titles=list(SOLVERS.keys()))
+    for i, (m, u_num) in enumerate(results_s.items(), start=1):
+        fig.add_trace(go.Scatter(x=x_s, y=u_num, name=m,
+                                 line=dict(color=COLORS[m], width=2),
+                                 showlegend=False),
+                      row=1, col=i)
+    fig.update_xaxes(title_text="x")
+    fig.update_yaxes(range=[-1.5, 1.5])
+    fig.update_layout(**PLOTLY_LAYOUT,
+                      title=f"ν = {nu_shock},  N = {N_shock}",
+                      height=380)
+    st.plotly_chart(fig, use_container_width=True)
 
 
 # ==================================================================
@@ -316,58 +352,65 @@ underlying flux structure; the **advective form** does not, and resolves the sho
         diff_path = ROOT / "figures" / "formulation_l2diff.png"
         if diff_path.exists():
             st.image(str(diff_path),
-                     caption="L2 difference between formulations grows monotonically as ν → 0",
+                     caption="L² difference grows monotonically as ν → 0",
                      use_container_width=True)
 
     zoom_path = ROOT / "figures" / "formulation_zoom.png"
     if zoom_path.exists():
         st.image(str(zoom_path),
-                 caption="Shock-layer zoom at ν=0.005 — shaded region is the pointwise difference between formulations",
+                 caption="Shock-layer zoom at ν=0.005 — shaded region is the pointwise difference",
                  use_container_width=True)
 
     st.subheader("Live comparison")
-    st.markdown(r"Pick $\nu$ and see both formulations side by side in real time.")
+    st.markdown(r"Pick $\nu$ and $N$ — both formulations update automatically.")
 
-    nu_form = st.select_slider(
-        r"Viscosity ν", options=[0.05, 0.02, 0.01, 0.005], value=0.01, key="form_nu"
-    )
-    N_form = st.select_slider(
-        "Grid points N", options=[64, 128, 256], value=256, key="form_N"
-    )
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        nu_form = st.select_slider(
+            r"Viscosity ν", options=[0.05, 0.02, 0.01, 0.005], value=0.01, key="form_nu"
+        )
+    with col_f2:
+        N_form = st.select_slider(
+            "Grid points N", options=[64, 128, 256], value=256, key="form_N"
+        )
 
-    if st.button("Run both formulations", type="primary"):
-        x_app  = np.linspace(0, 2*np.pi, N_form, endpoint=False)
-        u0_app = np.sin(x_app)
-        dx_app = 2*np.pi / N_form
+    with st.spinner("Solving…"):
+        x_f, u_adv, u_con, l2_diff = run_formulations(N_form, nu_form)
 
-        with st.spinner("Running advective..."):
-            u_adv, _ = solve_fdm(u0_app, N_form, 1.0, nu_form, cfl=0.4, formulation='advective')
-        with st.spinner("Running conservative..."):
-            u_con, _ = solve_fdm(u0_app, N_form, 1.0, nu_form, cfl=0.4, formulation='conservative')
+    fig = make_subplots(rows=1, cols=2,
+                        subplot_titles=("Full Profile", "Shock-layer Zoom [2.5, 4.5]"))
 
-        l2_diff = np.sqrt(dx_app * np.sum((u_adv - u_con)**2))
+    fig.add_trace(go.Scatter(x=x_f, y=u_adv, name="Advective",
+                             line=dict(color="#FF6347", width=2)),
+                  row=1, col=1)
+    fig.add_trace(go.Scatter(x=x_f, y=u_con, name="Conservative",
+                             line=dict(color="#4682B4", dash="dash", width=2)),
+                  row=1, col=1)
 
-        fig, axes = plt.subplots(1, 2, figsize=(11, 4))
+    mask = (x_f >= 2.5) & (x_f <= 4.5)
+    fig.add_trace(go.Scatter(x=x_f[mask], y=u_adv[mask], name="Advective",
+                             line=dict(color="#FF6347", width=2.5),
+                             showlegend=False),
+                  row=1, col=2)
+    fig.add_trace(go.Scatter(x=x_f[mask], y=u_con[mask], name="Conservative",
+                             line=dict(color="#4682B4", dash="dash", width=2.5),
+                             showlegend=False),
+                  row=1, col=2)
+    fig.add_trace(go.Scatter(
+        x=np.concatenate([x_f[mask], x_f[mask][::-1]]),
+        y=np.concatenate([u_adv[mask], u_con[mask][::-1]]),
+        fill="toself", fillcolor="rgba(128,0,128,0.2)",
+        line=dict(color="rgba(255,255,255,0)"),
+        name="Difference", showlegend=False),
+        row=1, col=2)
 
-        # Full profile overlay
-        axes[0].plot(x_app, u_adv, '-',  color='tomato',    lw=2, label='Advective')
-        axes[0].plot(x_app, u_con, '--', color='steelblue', lw=2, label='Conservative')
-        axes[0].set_title(f'Full profile  |  ν={nu_form}, N={N_form}')
-        axes[0].set_xlabel('x'); axes[0].legend(); axes[0].grid(alpha=0.3)
-        axes[0].set_ylim(-1.5, 1.5)
-
-        # Shock-layer zoom
-        mask = (x_app >= 2.5) & (x_app <= 4.5)
-        axes[1].plot(x_app[mask], u_adv[mask], '-',  color='tomato',    lw=2.5, label='Advective')
-        axes[1].plot(x_app[mask], u_con[mask], '--', color='steelblue', lw=2.5, label='Conservative')
-        axes[1].fill_between(x_app[mask], u_adv[mask], u_con[mask], alpha=0.2, color='purple')
-        axes[1].set_title('Shock-layer zoom  [2.5, 4.5]')
-        axes[1].set_xlabel('x'); axes[1].legend(); axes[1].grid(alpha=0.3)
-
-        plt.tight_layout()
-        st.pyplot(fig)
-        plt.close()
-        st.metric("L2 difference (adv − con)", f"{l2_diff:.3e}")
+    fig.update_xaxes(title_text="x")
+    fig.update_yaxes(title_text="u", row=1, col=1)
+    fig.update_layout(**PLOTLY_LAYOUT,
+                      title=f"ν = {nu_form},  N = {N_form}  |  L² diff = {l2_diff:.3e}",
+                      height=420)
+    st.plotly_chart(fig, use_container_width=True)
+    st.metric("L² difference (adv − con)", f"{l2_diff:.3e}")
 
 
 # ==================================================================
@@ -377,9 +420,7 @@ with tab6:
     st.header("About This Project")
 
     st.subheader("The PDE")
-    st.markdown(
-        "We study the **viscous Burgers equation** on a periodic domain:"
-    )
+    st.markdown("We study the **viscous Burgers equation** on a periodic domain:")
     st.latex(
         r"u_t + u\,u_x = \nu\,u_{xx}, \quad "
         r"x \in [0,\,2\pi], \quad "
