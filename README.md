@@ -66,7 +66,7 @@ The parameter $\nu > 0$ is the kinematic viscosity. For large $\nu$ the solution
 
 **Stability demonstration.** Showing numerical instability is harder than expected when the production scheme (Crank-Nicolson) is unconditionally stable. A naive attempt to violate the CFL condition simply does not blow up. The instability study required switching to a fully explicit scheme to expose the Von Neumann diffusion constraint $r \leq 0.5$, and using a fixed step count so the instability has enough iterations to grow. The final figure shows CN and explicit Euler at the same $\Delta t$ side by side --- the contrast is the point.
 
-![Stability](figures/cfl_blowup.png)
+![Stability](figures/readme_cfl_dark.png)
 
 > **Reading the figure.** Both columns use the exact same $\Delta t$, only the scheme changes. Top row: Crank-Nicolson stays stable and tracks the exact solution regardless of $r$. Bottom row: explicit Euler blows up at step 47 ($r=0.5$, right at the theoretical limit) and step 11 ($r=2.0$). The high-frequency oscillations filling the domain are the classic signature of a Von Neumann unstable scheme.
 
@@ -74,7 +74,7 @@ The parameter $\nu > 0$ is the kinematic viscosity. For large $\nu$ the solution
 
 **Viscosity range.** The comparative study is restricted to $\nu \geq 5 \times 10^{-3}$. For smaller values the Cole-Hopf reference solution becomes numerically ill-conditioned due to loss of floating-point resolution in the normalisation of the transformed variable. Extending the study into this regime would require switching to either a manufactured solution framework or a sufficiently resolved numerical reference solution.
 
-![Shock resolution](figures/shock_zoom.png)
+![Shock resolution](figures/readme_shock_zoom_dark.png)
 
 > **Reading the figure.** At $\nu=0.005$ all three methods struggle near the shock layer. FDM smears it (artificial viscosity), FEM develops spurious oscillations (no upwinding), and the spectral method rings (Gibbs phenomenon). The exact solution overlay is omitted here because its Fourier representation is itself unreliable at this viscosity.
 
