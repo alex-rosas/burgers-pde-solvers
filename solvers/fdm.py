@@ -1,16 +1,28 @@
-"""
-solvers/fdm.py
-==============
-Finite Difference solver for the viscous Burgers equation.
-
-Spatial:  upwind scheme for advection (1st order)
-          centred differences for diffusion (2nd order)
-Temporal: explicit advection + Crank-Nicolson diffusion (operator splitting)
-
-PDE:    u_t + u*u_x = nu * u_xx
-Domain: x in [0, 2*pi], periodic
-IC:     u(x,0) = sin(x)
-"""
+# solvers/fdm.py
+# ==============
+# Finite Difference solver for the viscous Burgers equation.
+#
+# Spatial:  upwind scheme for advection (1st order)
+#           centred differences for diffusion (2nd order)
+# Temporal: explicit advection + Crank-Nicolson diffusion (operator splitting)
+#
+# Two formulations of the nonlinear advection term are provided:
+#
+#   'advective'    -- non-conservative:  u * u_x
+#                     upwind differenced: u[j] * (u[j] - u[j-1]) / dx  (u >= 0)
+#
+#   'conservative' -- conservation law:  d(u^2/2)/dx
+#                     Godunov (Engquist-Osher) flux:
+#                     F_{j+1/2} = max(u[j],0)^2/2 + min(u[j+1],0)^2/2
+#
+# Both formulations are equivalent for smooth solutions (to first order in dx).
+# Near shocks the conservative form respects the Rankine-Hugoniot conditions
+# and produces the correct shock speed; the advective form does not.
+#
+# PDE:    u_t + u*u_x = nu * u_xx  (advective form)
+#      or u_t + d(u^2/2)/dx = nu * u_xx  (conservative form)
+# Domain: x in [0, 2*pi], periodic
+# IC:     u(x,0) = sin(x)
 
 import numpy as np
 from scipy.sparse import diags
@@ -19,11 +31,9 @@ from scipy.sparse.linalg import spsolve
 
 def build_cn_matrices(N, dx, nu, dt):
     """
-    Build the Crank-Nicolson matrices A and B (equation eq:matA, eq:matB).
+    Build the Crank-Nicolson matrices A and B for the diffusion substep.
 
-    A * u^{n+1} = B * u^*
-
-    alpha = nu * dt / (2 * dx^2)
+    Solves A * u^{n+1} = B * u^* where alpha = nu * dt / (2 * dx^2).
 
     A: diagonal = 1 + 2*alpha, off-diagonals = -alpha
     B: diagonal = 1 - 2*alpha, off-diagonals = +alpha
@@ -35,7 +45,7 @@ def build_cn_matrices(N, dx, nu, dt):
     N  : int   -- number of grid points
     dx : float -- grid spacing
     nu : float -- kinematic viscosity
-    dt : float -- time step (used only to compute alpha here)
+    dt : float -- time step
 
     Returns
     -------
@@ -66,7 +76,7 @@ def build_cn_matrices(N, dx, nu, dt):
 
 def upwind_advection(u, dx):
     """
-    Compute the upwind approximation of u * u_x (equation eq:upwind2).
+    Upwind approximation of u * u_x (non-conservative / advective form).
 
     For each grid point j:
       if u[j] >= 0: u_x ~ (u[j] - u[j-1]) / dx  (backward difference)
@@ -100,9 +110,50 @@ def upwind_advection(u, dx):
     return u * du
 
 
-def solve_fdm(u0, N, T, nu, cfl=0.5):
+def conservative_advection(u, dx):
     """
-    Main FDM time-stepping loop.
+    Conservative finite difference approximation of d(u^2/2)/dx.
+
+    Uses the Godunov (Engquist-Osher) upwind flux at each cell interface:
+
+        F_{j+1/2} = max(u[j], 0)^2 / 2  +  min(u[j+1], 0)^2 / 2
+
+    This is the exact Godunov flux for the convex flux f(u) = u^2/2.
+    It selects the correct upwind state at each interface without
+    manually branching on the sign of u, and satisfies the entropy condition.
+
+    The flux divergence is:
+
+        dF/dx |_j  =  (F_{j+1/2} - F_{j-1/2}) / dx
+
+    Unlike upwind_advection (which uses u[j] as the advection coefficient),
+    this form discretises the conservation law directly and therefore
+    respects the Rankine-Hugoniot shock-speed condition to first order.
+
+    Parameters
+    ----------
+    u  : np.ndarray -- current solution vector, shape (N,)
+    dx : float      -- grid spacing
+
+    Returns
+    -------
+    dF : np.ndarray -- d(u^2/2)/dx at each grid point, shape (N,)
+    """
+    u_right = np.roll(u, -1)   # u[j+1] with periodic wrap
+    u_left  = np.roll(u,  1)   # u[j-1] with periodic wrap
+
+    # Godunov flux at right interface j+1/2
+    F_right = 0.5 * np.maximum(u,       0.0)**2 + 0.5 * np.minimum(u_right, 0.0)**2
+
+    # Godunov flux at left interface j-1/2
+    F_left  = 0.5 * np.maximum(u_left,  0.0)**2 + 0.5 * np.minimum(u,       0.0)**2
+
+    return (F_right - F_left) / dx
+
+
+def solve_fdm(u0, N, T, nu, cfl=0.5, formulation='advective'):
+    """
+    Advance the FDM solution from t=0 to t=T using operator splitting.
 
     Each step:
       1. Compute adaptive dt from CFL condition
@@ -112,17 +163,22 @@ def solve_fdm(u0, N, T, nu, cfl=0.5):
 
     Parameters
     ----------
-    u0  : np.ndarray -- initial condition, shape (N,)
-    N   : int        -- number of grid points
-    T   : float      -- final time
-    nu  : float      -- kinematic viscosity
-    cfl : float      -- CFL number (default 0.5, must be <= 1 for stability)
+    u0          : np.ndarray -- initial condition, shape (N,)
+    N           : int        -- number of grid points
+    T           : float      -- final time
+    nu          : float      -- kinematic viscosity
+    cfl         : float      -- CFL number (default 0.5, must be <= 1 for stability)
+    formulation : str        -- 'advective' (default) uses upwind_advection (u*u_x);
+                               'conservative' uses conservative_advection (d(u^2/2)/dx)
 
     Returns
     -------
-    u   : np.ndarray -- solution at time T, shape (N,)
-    t   : float      -- actual final time reached
+    u : np.ndarray -- solution at time T, shape (N,)
+    t : float      -- actual final time reached
     """
+    if formulation not in ('advective', 'conservative'):
+        raise ValueError(f"formulation must be 'advective' or 'conservative', got {formulation!r}")
+    advect = upwind_advection if formulation == 'advective' else conservative_advection
     dx = 2.0 * np.pi / N
     u  = u0.copy()
     t  = 0.0
@@ -141,7 +197,7 @@ def solve_fdm(u0, N, T, nu, cfl=0.5):
 
         # -- Substep 1: explicit advection
         # u* = u^n - dt * f(u^n)
-        f     = upwind_advection(u, dx)
+        f      = advect(u, dx)
         u_star = u - dt * f
 
         # -- Substep 2: implicit diffusion

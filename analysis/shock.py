@@ -24,7 +24,7 @@ T         = 1.0
 CFL       = 0.4
 NU_VALUES = [0.05, 0.02, 0.01, 0.005]
 
-# Exact solution is reliable only for nu >= 0.02 at N=256
+# Exact solution is reliable only for nu >= 0.05 at N=256
 # For smaller nu, phi0 requires too many Fourier modes to represent
 EXACT_RELIABLE = {0.05: True, 0.02: False, 0.01: False, 0.005: False}
 
