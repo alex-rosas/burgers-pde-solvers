@@ -136,8 +136,8 @@ cd burgers-pde-solvers
 conda create -n burgers python=3.11
 conda activate burgers
 pip install -r requirements.txt
-conda env config vars set PYTHONPATH="$(pwd)"
-conda activate burgers           # re-activate to apply the variable
+conda env config vars set PYTHONPATH="$(pwd)"  # Windows: use %cd% (cmd) or $PWD (PowerShell)
+conda activate burgers                         # re-activate to apply the variable
 ```
 
 ### Running the project
